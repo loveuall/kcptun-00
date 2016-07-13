@@ -1,0 +1,20 @@
+{
+    "server":"0.0.0.0",
+    "server_port":8083,
+    "redir_port":1080,
+    "socks5_port":8080,
+    "password":"yourpassword",
+    "mode":"fast2",
+    "sndwnd":128,
+    "rcvwnd":1024,
+    "mtu":1350,
+    "nocomp": true,
+
+    "port_password": {
+	    "8083":"yourpassword", "8084":"cccc"
+    },
+    "_comment": {
+	    "redir_port": "Transparent proxy port for router"
+    }
+}
+
