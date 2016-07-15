@@ -29,7 +29,7 @@ var (
 	// VERSION is injected by buildflags
 	VERSION = "SELFBUILD"
 	// SALT is use for pbkdf2 key expansion
-	SALT = "kcp-go"
+	SALT             = "kcp-go"
 	errAddrType      = errors.New("socks addr type not supported")
 	errVer           = errors.New("socks version not supported")
 	errMethod        = errors.New("socks only support 1 method now")
@@ -157,10 +157,6 @@ func getOriginalDst(conn *net.TCPConn) (rawaddr []byte, host string, err error) 
 		defer f.Close()
 
 		fd := int(f.Fd())
-		//https://github.com/cybozu-go/transocks/blob/master/original_dst_linux.go#L44
-		if err = syscall.SetNonblock(fd, true); err != nil {
-			return
-		}
 
 		//TODO for ipv6
 		addr, err2 := GetMreq(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST)
