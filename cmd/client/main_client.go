@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,8 +26,10 @@ import (
 type ClosingFn func() error
 
 var (
-	VERSION          = "SELFBUILD"
-	SALT             = "kcp-go"
+	// VERSION is injected by buildflags
+	VERSION = "SELFBUILD"
+	// SALT is use for pbkdf2 key expansion
+	SALT = "kcp-go"
 	errAddrType      = errors.New("socks addr type not supported")
 	errVer           = errors.New("socks version not supported")
 	errMethod        = errors.New("socks only support 1 method now")
@@ -49,7 +50,12 @@ const (
 
 type clientManager struct {
 	config cmm.Config
-	chConn chan net.Conn
+	conns  chan localConn
+}
+
+type localConn struct {
+	conn *net.TCPConn
+	do   func(*clientManager, net.Conn, net.Conn) error
 }
 
 type compStream struct {
@@ -145,38 +151,36 @@ func handleRedirClient(mgr *clientManager, p1, p2 net.Conn) (err error) {
 }
 
 func getOriginalDst(conn *net.TCPConn) (rawaddr []byte, host string, err error) {
-	ptrVal := reflect.ValueOf(conn)
-	val := reflect.Indirect(ptrVal)
-
-	val1conn := val.FieldByName("conn")
-	val2 := reflect.Indirect(val1conn)
-
-	// which is a net.conn from which we get the 'fd' field
-	fdmember := val2.FieldByName("fd")
-	val3 := reflect.Indirect(fdmember)
-
-	// which is a netFD from which we get the 'sysfd' field
-	netFdPtr := val3.FieldByName("sysfd")
-
-	//runtime.GOOS == "linux"
-	fd := int(netFdPtr.Int())
-	//addr, err2 := syscall.GetsockoptIPv6Mreq(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST)
-	addr, err2 := GetMreq(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST)
-	if err2 != nil {
+	if f, err2 := conn.File(); err != nil {
 		err = err2
-		return
+	} else {
+		defer f.Close()
+
+		fd := int(f.Fd())
+		//https://github.com/cybozu-go/transocks/blob/master/original_dst_linux.go#L44
+		if err = syscall.SetNonblock(fd, true); err != nil {
+			return
+		}
+
+		//TODO for ipv6
+		addr, err2 := GetMreq(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST)
+		if err2 != nil {
+			err = err2
+			return
+		}
+
+		//idType ipv4 port = 1 + 4 + 2
+		rawaddr = make([]byte, 7)
+
+		rawaddr[0] = 1 // typeIPv4, type is ipv4 address
+		copy(rawaddr[1:5], addr[4:8])
+		copy(rawaddr[5:7], addr[2:4])
+
+		//Just for debug
+		//port := binary.BigEndian.Uint16(rawaddr[5:7])
+		//host = net.JoinHostPort(net.IP(rawaddr[1:5]).String(), strconv.Itoa(int(port)))
+
 	}
-
-	//idType ipv4 port = 1 + 4 + 2
-	rawaddr = make([]byte, 7)
-
-	rawaddr[0] = 1 // typeIPv4, type is ipv4 address
-	copy(rawaddr[1:5], addr[4:8])
-	copy(rawaddr[5:7], addr[2:4])
-
-	//Just for debug
-	//port := binary.BigEndian.Uint16(rawaddr[5:7])
-	//host = net.JoinHostPort(net.IP(rawaddr[1:5]).String(), strconv.Itoa(int(port)))
 
 	return
 }
@@ -326,7 +330,9 @@ func handleClient(p1, p2 io.ReadWriteCloser) {
 
 func newManagerByContext(c *cli.Context) (mgr *clientManager) {
 	var err error
-	mgr = &clientManager{chConn: make(chan net.Conn)}
+	mgr = &clientManager{
+		conns: make(chan localConn, 32),
+	}
 	config := &mgr.config
 
 	path := c.String("c")
@@ -380,83 +386,6 @@ func newManagerByContext(c *cli.Context) (mgr *clientManager) {
 	return
 }
 
-func (mgr *clientManager) createConn() *yamux.Session {
-	config := mgr.config
-	pass := pbkdf2.Key([]byte(config.Password), []byte(SALT), 4096, 32, sha1.New)
-	var block kcp.BlockCrypt
-	switch config.Crypt {
-	case "tea":
-		block, _ = kcp.NewTEABlockCrypt(pass[:16])
-	case "xor":
-		block, _ = kcp.NewSimpleXORBlockCrypt(pass)
-	case "none":
-		block, _ = kcp.NewNoneBlockCrypt(pass)
-	default:
-		block, _ = kcp.NewAESBlockCrypt(pass)
-	}
-
-	remoteAddr := config.Server + ":" + strconv.Itoa(config.ServerPort)
-	log.Println("remote address:", remoteAddr)
-
-	kcpconn, err := kcp.DialWithOptions(remoteAddr, block, config.Datashard, config.Parityshard)
-	checkError(err)
-	kcpconn.SetNoDelay(config.Nodelay, config.Interval, config.Resend, config.Nc)
-	kcpconn.SetWindowSize(config.Sndwnd, config.Rcvwnd)
-	kcpconn.SetMtu(config.Mtu)
-	kcpconn.SetACKNoDelay(config.Acknodelay)
-	kcpconn.SetDSCP(config.Dscp)
-
-	// stream multiplex
-	yconfig := &yamux.Config{
-		AcceptBacklog:          256,
-		EnableKeepAlive:        true,
-		KeepAliveInterval:      30 * time.Second,
-		ConnectionWriteTimeout: 30 * time.Second,
-		MaxStreamWindowSize:    16777216,
-		LogOutput:              os.Stderr,
-	}
-	var session *yamux.Session
-	if config.Nocomp {
-		session, err = yamux.Client(kcpconn, yconfig)
-	} else {
-		session, err = yamux.Client(newCompStream(kcpconn), yconfig)
-	}
-	checkError(err)
-	return session
-}
-
-func (mgr *clientManager) initConn() {
-	config := mgr.config
-
-	numconn := config.Conn
-	var muxes []*yamux.Session
-	for i := 0; i < numconn; i++ {
-		muxes = append(muxes, mgr.createConn())
-	}
-
-	rr := 0
-	for {
-		mux := muxes[rr%numconn]
-		p2, err := mux.Open()
-		if err != nil { // yamux failure
-			log.Println(err)
-			mux.Close()
-			muxes[rr%numconn] = mgr.createConn()
-			mgr.chConn <- errConnSingle
-			log.Println("errConnSingle created!")
-			continue
-		}
-		mgr.chConn <- p2
-		rr++
-	}
-}
-
-func createServerConn() (net.Conn, error) {
-	mgr := gMgr
-	p2 := <-mgr.chConn
-	return p2, nil
-}
-
 func (mgr *clientManager) runSocks5() {
 	addr, err := net.ResolveTCPAddr("tcp", ":"+strconv.Itoa(mgr.config.Socks5Port))
 	checkError(err)
@@ -465,17 +394,16 @@ func (mgr *clientManager) runSocks5() {
 	log.Println("listening socks5 on:", listener.Addr())
 
 	for {
-		if conn, err := listener.AcceptTCP(); err == nil {
-			conn.SetNoDelay(false)
-			if p2, err := createServerConn(); err == nil {
-				go handleSocks5Client(gMgr, conn, p2)
-			} else {
-				conn.Close()
-			}
-		} else {
+		lConn := localConn{do: handleSocks5Client}
+
+		lConn.conn, err = listener.AcceptTCP()
+		if err != nil {
 			log.Println(err)
-			return
+			continue
 		}
+
+		//lConn.conn.SetNoDelay(false)
+		mgr.conns <- lConn
 	}
 }
 
@@ -487,18 +415,16 @@ func (mgr *clientManager) runRedirect() {
 	log.Println("listening redir on:", listener.Addr())
 
 	for {
-		if conn, err := listener.AcceptTCP(); err != nil {
+		lConn := localConn{do: handleRedirClient}
+
+		lConn.conn, err = listener.AcceptTCP()
+		if err != nil {
 			log.Println(err)
-			return
-		} else {
-			if p2, err := createServerConn(); err == nil {
-				conn.SetNoDelay(false)
-				go handleRedirClient(gMgr, conn, p2)
-			} else {
-				conn.Close()
-			}
+			continue
 		}
 
+		//lConn.conn.SetNoDelay(false)
+		mgr.conns <- lConn
 	}
 }
 
@@ -617,6 +543,7 @@ func main() {
 		mgr := newManagerByContext(c)
 		config := mgr.config
 		gMgr = mgr
+		pass := pbkdf2.Key([]byte(config.Password), []byte(SALT), 4096, 32, sha1.New)
 
 		switch config.Mode {
 		case "normal":
@@ -646,7 +573,70 @@ func main() {
 			go mgr.runSocks5()
 		}
 
-		mgr.initConn()
+		createConn := func() *yamux.Session {
+			var block kcp.BlockCrypt
+			switch config.Crypt {
+			case "tea":
+				block, _ = kcp.NewTEABlockCrypt(pass[:16])
+			case "xor":
+				block, _ = kcp.NewSimpleXORBlockCrypt(pass)
+			case "none":
+				block, _ = kcp.NewNoneBlockCrypt(pass)
+			default:
+				block, _ = kcp.NewAESBlockCrypt(pass)
+			}
+
+			remoteAddr := config.Server + ":" + strconv.Itoa(config.ServerPort)
+			log.Println("remote address:", remoteAddr)
+
+			kcpconn, err := kcp.DialWithOptions(remoteAddr, block, config.Datashard, config.Parityshard)
+			checkError(err)
+			kcpconn.SetNoDelay(config.Nodelay, config.Interval, config.Resend, config.Nc)
+			kcpconn.SetWindowSize(config.Sndwnd, config.Rcvwnd)
+			kcpconn.SetMtu(config.Mtu)
+			kcpconn.SetACKNoDelay(config.Acknodelay)
+			kcpconn.SetDSCP(config.Dscp)
+
+			// stream multiplex
+			yconfig := &yamux.Config{
+				AcceptBacklog:          256,
+				EnableKeepAlive:        true,
+				KeepAliveInterval:      30 * time.Second,
+				ConnectionWriteTimeout: 30 * time.Second,
+				MaxStreamWindowSize:    16777216,
+				LogOutput:              os.Stderr,
+			}
+			var session *yamux.Session
+			if config.Nocomp {
+				session, err = yamux.Client(kcpconn, yconfig)
+			} else {
+				session, err = yamux.Client(newCompStream(kcpconn), yconfig)
+			}
+			checkError(err)
+			return session
+		}
+
+		numconn := config.Conn
+		var muxes []*yamux.Session
+		for i := 0; i < numconn; i++ {
+			muxes = append(muxes, createConn())
+		}
+
+		rr := 0
+		for p1 := range mgr.conns {
+			mux := muxes[rr%numconn]
+			p2, err := mux.Open()
+			if err != nil { // yamux failure
+				log.Println(err)
+				p1.conn.Close()
+				mux.Close()
+				muxes[rr%numconn] = createConn()
+				continue
+			}
+
+			go p1.do(mgr, p1.conn, p2)
+			rr++
+		}
 	}
 	myApp.Run(os.Args)
 }
