@@ -33,8 +33,8 @@ done
 # ARM
 ARMS=(5 6 7)
 for v in ${ARMS[@]}; do
-	env GOGC=60 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=$v go build -ldflags "$LDFLAGS" -o client_linux_arm$v  github.com/loveuall/kcptun/cmd/client
-	env GOGC=60 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=$v go build -ldflags "$LDFLAGS" -o server_linux_arm$v  github.com/loveuall/kcptun/cmd/server
+	env GOGC=100 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=$v go build -ldflags "$LDFLAGS" -o client_linux_arm$v  github.com/loveuall/kcptun/cmd/client
+	env GOGC=100 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=$v go build -ldflags "$LDFLAGS" -o server_linux_arm$v  github.com/loveuall/kcptun/cmd/server
 done
 if $UPX; then upx -9 client_linux_arm* server_linux_arm*;fi
 tar -zcf kcptun-linux-arm-$VERSION.tar.gz client_linux_arm* server_linux_arm*
