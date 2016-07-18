@@ -40,11 +40,10 @@ func ParseConfig(config *Config, path string) (err error) {
 	}
 	defer file.Close()
 
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
+	if err = json.NewDecoder(file).Decode(config); err != nil {
 		return
 	}
 
-	err = json.Unmarshal(data, config)
 	return
 }
+
