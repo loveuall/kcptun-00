@@ -2,7 +2,6 @@ package common
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 )
 
