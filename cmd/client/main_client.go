@@ -395,7 +395,7 @@ func (mgr *clientManager) runSocks5() {
 		lConn.conn, err = listener.AcceptTCP()
 		if err != nil {
 			log.Println(err)
-			continue
+			return
 		}
 
 		//lConn.conn.SetNoDelay(false)
@@ -416,7 +416,7 @@ func (mgr *clientManager) runRedirect() {
 		lConn.conn, err = listener.AcceptTCP()
 		if err != nil {
 			log.Println(err)
-			continue
+			return
 		}
 
 		//lConn.conn.SetNoDelay(false)
