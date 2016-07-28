@@ -99,6 +99,7 @@ func runMux(config *cmm.Config, port string, password string) {
 	for {
 		if conn, err := lis.Accept(); err == nil {
 			log.Println("remote address:", conn.RemoteAddr())
+			conn.SetStreamMode(true)
 			conn.SetNoDelay(config.Nodelay, config.Interval, config.Resend, config.Nc)
 			conn.SetMtu(config.Mtu)
 			conn.SetWindowSize(config.Rcvwnd, config.Rcvwnd)

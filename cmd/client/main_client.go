@@ -587,6 +587,7 @@ func main() {
 
 			kcpconn, err := kcp.DialWithOptions(remoteAddr, block, config.Datashard, config.Parityshard)
 			checkError(err)
+			kcpconn.SetStreamMode(true)
 			kcpconn.SetNoDelay(config.Nodelay, config.Interval, config.Resend, config.Nc)
 			kcpconn.SetWindowSize(config.Sndwnd, config.Rcvwnd)
 			kcpconn.SetMtu(config.Mtu)
