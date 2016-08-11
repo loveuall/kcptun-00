@@ -7,6 +7,6 @@ add config.json for https://github.com/xtaci/kcptun
 4. 小白尽管使用本项目，大神请使用原作者，也请指出项目不足的修改思路，再增加自己的代理层。
 5. 路由器用户推荐使用本项目，因为给路由器的配置带来更大的便利，也是这个项目的初衷。
 
-请保证 kcp-go urfave/cli 等项目处于最新分支
+编译请保证 kcp-go urfave/cli 等项目处于最新代码。
 
 
