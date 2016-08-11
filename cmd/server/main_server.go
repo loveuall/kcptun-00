@@ -26,7 +26,7 @@ import (
 var (
 	VERSION     = "SELFBUILD"
 	SALT        = "kcp-go"
-	ReadTimeout = (2 * time.Second)
+	ReadTimeout = (10 * time.Second)
 )
 
 type compStream struct {
@@ -96,6 +96,16 @@ func runMux(config *cmm.Config, port string, password string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	if err := lis.SetDSCP(config.Dscp); err != nil {
+		log.Println("SetDSCP:", err)
+	}
+	if err := lis.SetReadBuffer(config.Sockbuf); err != nil {
+		log.Println("SetReadBuffer:", err)
+	}
+	if err := lis.SetWriteBuffer(config.Sockbuf); err != nil {
+		log.Println("SetWriteBuffer:", err)
+	}
 	for {
 		if conn, err := lis.Accept(); err == nil {
 			log.Println("remote address:", conn.RemoteAddr())
@@ -104,7 +114,6 @@ func runMux(config *cmm.Config, port string, password string) {
 			conn.SetMtu(config.Mtu)
 			conn.SetWindowSize(config.Rcvwnd, config.Rcvwnd)
 			conn.SetACKNoDelay(config.Acknodelay)
-			conn.SetDSCP(config.Dscp)
 			if config.Nocomp {
 				go handleMux(conn, config)
 			} else {
@@ -385,8 +394,9 @@ func main() {
 			Usage: "set reed-solomon erasure coding - parityshard",
 		},
 		cli.BoolFlag{
-			Name:  "acknodelay",
-			Usage: "flush ack immediately when a packet is received",
+			Name:   "acknodelay",
+			Usage:  "flush ack immediately when a packet is received",
+			Hidden: true,
 		},
 		cli.IntFlag{
 			Name:  "dscp",
@@ -413,13 +423,23 @@ func main() {
 			Value:  0,
 			Hidden: true,
 		},
+		cli.IntFlag{
+			Name:   "sockbuf",
+			Value:  4194304, // socket buffer size in bytes
+			Hidden: true,
+		},
+		cli.IntFlag{
+			Name:   "keepalive",
+			Value:  10, // nat keepalive interval in seconds
+			Hidden: true,
+		},
 		cli.StringFlag{
 			Name:  "c",
 			Value: "",
 			Usage: "path of config.json file",
 		},
 	}
-	myApp.Action = func(c *cli.Context) {
+	myApp.Action = func(c *cli.Context) error {
 		log.Println("version:", VERSION)
 
 		config := newConfigFromContext(c)
@@ -447,6 +467,8 @@ func main() {
 		log.Println("dscp:", config.Dscp)
 		log.Println("compression:", !config.Nocomp)
 		log.Println("datashard:", config.Datashard, "parityshard:", config.Parityshard)
+		log.Println("sockbuf:", config.Sockbuf)
+		log.Println("keepalive:", config.KeepAlive)
 
 		i := 0
 		for ok, ov := range config.PortPassword {
@@ -454,12 +476,15 @@ func main() {
 
 			k, v := ok, ov
 			if i == len(config.PortPassword) {
+				//The last port/password, block current goroutine
 				runMux(config, k, v)
 				break
 			}
 
 			go runMux(config, k, v)
 		}
+
+		return nil
 	}
 	myApp.Run(os.Args)
 }

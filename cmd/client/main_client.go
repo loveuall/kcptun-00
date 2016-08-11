@@ -42,7 +42,7 @@ var (
 )
 
 const (
-	ReadTimeout     = (2 * time.Second)
+	ReadTimeout     = (10 * time.Second)
 	SocksVer5       = 5
 	SocksCmdConnect = 1
 	SO_ORIGINAL_DST = 80
@@ -348,6 +348,8 @@ func newManagerByContext(c *cli.Context) (mgr *clientManager) {
 	config.Nocomp = c.Bool("nocomp")
 	config.Datashard = c.Int("datashard")
 	config.Parityshard = c.Int("parityshard")
+	config.Sockbuf = c.Int("sockbuf")
+	config.KeepAlive = c.Int("keepalive")
 
 	if path == "" {
 		ss := strings.Split(c.String("remoteaddr"), ":")
@@ -527,6 +529,16 @@ func main() {
 			Value:  0,
 			Hidden: true,
 		},
+		cli.IntFlag{
+			Name:   "sockbuf",
+			Value:  4194304, // socket buffer size in bytes
+			Hidden: true,
+		},
+		cli.IntFlag{
+			Name:   "keepalive",
+			Value:  10, // nat keepalive interval in seconds
+			Hidden: true,
+		},
 		cli.StringFlag{
 			Name:  "c",
 			Value: "",
@@ -534,7 +546,7 @@ func main() {
 		},
 	}
 
-	myApp.Action = func(c *cli.Context) {
+	myApp.Action = func(c *cli.Context) error {
 		log.Println("version:", VERSION)
 		mgr := newManagerByContext(c)
 		config := mgr.config
@@ -560,6 +572,8 @@ func main() {
 		log.Println("dscp:", config.Dscp)
 		log.Println("compression:", !config.Nocomp)
 		log.Println("datashard:", config.Datashard, "parityshard:", config.Parityshard)
+		log.Println("sockbuf:", config.Sockbuf)
+		log.Println("keepalive:", config.KeepAlive)
 
 		if config.RedirPort > 0 {
 			go mgr.runRedirect()
@@ -592,7 +606,17 @@ func main() {
 			kcpconn.SetWindowSize(config.Sndwnd, config.Rcvwnd)
 			kcpconn.SetMtu(config.Mtu)
 			kcpconn.SetACKNoDelay(config.Acknodelay)
-			kcpconn.SetDSCP(config.Dscp)
+			kcpconn.SetKeepAlive(config.KeepAlive)
+
+			if err := kcpconn.SetDSCP(config.Dscp); err != nil {
+				log.Println("SetDSCP:", err)
+			}
+			if err := kcpconn.SetReadBuffer(config.Sockbuf); err != nil {
+				log.Println("SetReadBuffer:", err)
+			}
+			if err := kcpconn.SetWriteBuffer(config.Sockbuf); err != nil {
+				log.Println("SetWriteBuffer:", err)
+			}
 
 			// stream multiplex
 			yconfig := &yamux.Config{
@@ -634,6 +658,8 @@ func main() {
 			go p1.do(mgr, p1.conn, p2)
 			rr++
 		}
+
+		return nil
 	}
 	myApp.Run(os.Args)
 }

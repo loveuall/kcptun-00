@@ -27,6 +27,8 @@ type Config struct {
 	Interval   int  `json:"interval"`
 	Resend     int  `json:"resend"`
 	Nc         int  `json:"nc"`
+	Sockbuf    int  `json:"sockbuf"`
+	KeepAlive  int  `json:"keepalive"`
 
 	// following options are only used by server
 	PortPassword map[string]string `json:"port_password"`
@@ -45,4 +47,3 @@ func ParseConfig(config *Config, path string) (err error) {
 
 	return
 }
-
