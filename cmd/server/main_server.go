@@ -134,7 +134,7 @@ func handleMux(conn net.Conn, config *cmm.Config) {
 		EnableKeepAlive:        true,
 		KeepAliveInterval:      30 * time.Second,
 		ConnectionWriteTimeout: 30 * time.Second,
-		MaxStreamWindowSize:    16777216,
+		MaxStreamWindowSize:    uint32(config.Sockbuf),
 		LogOutput:              os.Stderr,
 	}
 	m, err := yamux.Server(conn, yconfig)
@@ -338,6 +338,10 @@ func newConfigFromContext(c *cli.Context) (config *cmm.Config) {
 
 func main() {
 	rand.Seed(int64(time.Now().Nanosecond()))
+	if VERSION == "SELFBUILD" {
+		// add more log flags for debugging
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+	}
 	myApp := cli.NewApp()
 	myApp.Name = "kcptun"
 	myApp.Usage = "kcptun server"
