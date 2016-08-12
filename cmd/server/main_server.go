@@ -307,6 +307,8 @@ func newConfigFromContext(c *cli.Context) (config *cmm.Config) {
 	config.Nocomp = c.Bool("nocomp")
 	config.Datashard = c.Int("datashard")
 	config.Parityshard = c.Int("parityshard")
+	config.Sockbuf = c.Int("sockbuf")
+	config.KeepAlive = c.Int("keepalive")
 
 	if path == "" {
 		ss := strings.Split(c.String("listen"), ":")
